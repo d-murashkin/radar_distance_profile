@@ -1,27 +1,24 @@
 #include <Arduino.h>
 #include <SPI.h>
-#include <Adafruit_ST7789.h>
-//#include <Adafruit_ST7735.h>
+//#include <Adafruit_ST7789.h>
+#include <Adafruit_ST7735.h>
 #include <Adafruit_GFX.h>
 
-#define TFT_WIDTH 128
-#define TFT_HEIGHT 128
-//#define TFT_CS 7
-//#define TFT_MOSI 6
-//#define TFT_MISO 5
-//#define TFT_SCLK 4
-//#define TFT_RST 3
-//#define TFT_DC 2
-#define TFT_CS 10
-#define TFT_MOSI 7
-#define TFT_MISO 2
-#define TFT_SCLK 6
+#define ST7789_DRIVER
+//#define TFT_WIDTH 128
+//#define TFT_HEIGHT 128
+#define TFT_WIDTH 180
+#define TFT_HEIGHT 180
+
+#define LOAD_GLCD
+//#define TOUCH_CS -1
+
+#define TFT_CS 0
+#define TFT_MOSI 6
+#define TFT_MISO 5
+#define TFT_SCLK 4
 #define TFT_RST 3
 #define TFT_DC 1
-
-//#define TFT_SPI_MODE 0
-//#define USE_SOFTWARE_SPI
-
 
 #define RADAR_SERIAL Serial1
 #define RADAR_RX_PIN 20
@@ -31,63 +28,54 @@
 
 int distH = 0, distL = 0, dist = 0;
 int cnt = 0;
+int line_cnt = 0;
 int delay_length_ms = 1;
 unsigned char buffer[BUFFER_SIZE] = {};
 
 uint8_t image_array[TFT_HEIGHT][TFT_WIDTH] = {0};
 
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK);
-//Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+//Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK);
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
-/*
-uint8_t get_color(uint8_t intensity) {
-  uint8_t r, g, b;
-  uint8_t intensity_threshold = 14;
-  if (intensity < intensity_threshold){
-    r = 0;
-    g = (intensity * 10);
-    b = 255;
-  } else if (intensity < intensity_threshold * 2) {
-    r = 0;
-    g = 255;
-    b = 255 - ((intensity - intensity_threshold) * 10);
-  } else {
-    r = (intensity - intensity_threshold * 2) * 10;
-    g = 255 - ((intensity - intensity_threshold * 2) * 10);
-    b = 0;
-  }
-  return tft.color565(r, g, b);
+// Convert 24-bit RGB to 16-bit RGB565
+uint16_t rgbToRGB565(uint8_t r, uint8_t g, uint8_t b) {
+    return ((b >> 3) << 11) | ((g >> 2) << 5) | (r >> 3);
 }
-  */
+
+uint16_t plasmaColorMap[] = {
+    rgbToRGB565(13, 8, 135), rgbToRGB565(17, 11, 140), rgbToRGB565(22, 15, 146),
+    rgbToRGB565(26, 19, 152), rgbToRGB565(31, 22, 158), rgbToRGB565(35, 26, 163),
+    rgbToRGB565(40, 30, 169), rgbToRGB565(45, 34, 175), rgbToRGB565(49, 38, 181),
+    rgbToRGB565(54, 42, 186), rgbToRGB565(58, 46, 192), rgbToRGB565(63, 50, 197),
+    rgbToRGB565(67, 54, 203), rgbToRGB565(71, 58, 208), rgbToRGB565(76, 62, 214),
+    rgbToRGB565(80, 66, 219), rgbToRGB565(85, 70, 224), rgbToRGB565(89, 74, 229),
+    rgbToRGB565(93, 77, 234), rgbToRGB565(97, 81, 239), rgbToRGB565(102, 85, 244),
+    rgbToRGB565(106, 89, 248), rgbToRGB565(110, 92, 253), rgbToRGB565(114, 96, 255),
+    rgbToRGB565(118, 99, 255), rgbToRGB565(122, 103, 255), rgbToRGB565(126, 106, 255),
+    rgbToRGB565(130, 109, 255), rgbToRGB565(134, 112, 255), rgbToRGB565(138, 115, 255),
+    rgbToRGB565(142, 118, 255), rgbToRGB565(146, 121, 255), rgbToRGB565(150, 124, 255),
+    rgbToRGB565(154, 127, 255), rgbToRGB565(158, 130, 255), rgbToRGB565(162, 133, 255),
+    rgbToRGB565(166, 136, 255), rgbToRGB565(170, 139, 255), rgbToRGB565(174, 142, 255),
+    rgbToRGB565(178, 145, 255), rgbToRGB565(182, 148, 255), rgbToRGB565(186, 151, 255),
+    rgbToRGB565(190, 154, 255), rgbToRGB565(194, 157, 255), rgbToRGB565(198, 160, 255)
+};
+
+uint16_t mapValueToPlasmaColor(int value) {
+    if (value < 1) value = 1;
+    if (value > 44) value = 44;
+    return plasmaColorMap[value - 1];
+}
 
 void setup() {
   Serial.begin(115200);
-  RADAR_SERIAL.begin(RADAR_BAUDRATE, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
-  pinMode(3, OUTPUT);
-    delay(100);
-    digitalWrite(3, HIGH);
-    delay(100);
-    digitalWrite(3, LOW);
-  tft.init(TFT_HEIGHT, TFT_WIDTH);
-  tft.setSPISpeed(1000000);
-//  tft.initR(INITR_MINI160x80);
+//  tft.init(TFT_HEIGHT, TFT_WIDTH);
+  tft.initR(INITR_MINI160x80);
   tft.fillScreen(ST77XX_BLUE);
-//  tft.setRotation(0);
-  delay(5000);
+  tft.setRotation(3);
+  delay(3000);
   Serial.println("TFT initialized");
-  delay(1000);
-  tft.drawRect(10, 10, 50, 50, ST77XX_RED);
+  tft.drawRect(0, 0, 126, 80, ST77XX_RED);
   Serial.println("Rectangle drawn");
-  /*
-  for (int y = 0; y < TFT_HEIGHT; y++) {
-    for (int x = 0; x < TFT_WIDTH; x++) {
-////      uint16_t color = get_color(image_array[y][x]);
-//      uint16_t color = tft.color565(128, 0, 0);
-//      tft.drawPixel(x, y, color);
-      tft.drawPixel(x, y, ST77XX_RED);
-    }
-  }
-  */
   tft.setTextColor(ST77XX_GREEN);
   Serial.println("Text color set");
   tft.setTextSize(2);
@@ -96,6 +84,8 @@ void setup() {
   Serial.println("Cursor set");
   tft.println("Hello!");
   Serial.println("Text printed");
+
+  RADAR_SERIAL.begin(RADAR_BAUDRATE, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
 }
 
 void loop() {
@@ -127,6 +117,12 @@ void loop() {
         for (int i = 4; i < 131; i++) {
           Serial.print(buffer[i]);
           Serial.print(" ");
+          tft.drawPixel(i - 4, line_cnt, mapValueToPlasmaColor(buffer[i]));
+        }
+        line_cnt++;
+        if (line_cnt >= 80) {
+          line_cnt = 0;
+          tft.fillScreen(ST77XX_BLACK);
         }
         Serial.println();
         delay(delay_length_ms);
